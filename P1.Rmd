@@ -1,0 +1,113 @@
+---
+title: "HAR Data Analysis"
+author: "Obi Isebor"
+date: "Sunday, July 26, 2015"
+output: html_document
+---
+
+### Executive Summary
+
+Given Human Activity Recognition (HAR) data, the goal of this project was to 
+predict how subjects perform a weight-lifting exercise (Unilateral Dumbbell 
+Biceps Curl), in a manner that corresponds to the specified execution of the 
+exercise (class A) or in ways that correspond to 4 common mistakes (classes B - E).
+
+Following the analysis presented in the next section, it was found that a prediction
+model based on Random Forests (RF) from the R caret package was sufficient to properly
+predict how subjects performed the weight-lifting exercise given the provided HAR
+training and test data. Training the prediction model takes quite a bit of time
+depending on the number of observations and variables so training and cross-validation
+were done with an increasing proportion of training observations until sufficient
+accuracy of the prediction model was obtained. 
+
+It was discovered that only 10% of the provided training set was required to 
+train the RF model to over 98% out-of-sample accuracy (required 13 minutes to 
+train) which was deemed sufficient for the purposes of the project. The classes 
+of the 20 provided test cases were predicted correctly, validating the decision 
+to use only a small but sufficient training set.
+
+### Analysis
+
+Assuming that both provided HAR training and test sets are in the current working
+directory, read in the large training and 20-case test data (note that blanks are 
+treated the same as `NA`).
+```{r get_data, cache = TRUE}
+library(ggplot2)
+library(caret)
+lt_data <- read.csv("pml-training.csv", na.strings=c("", "NA"))
+test_data <- read.csv("pml-testing.csv", na.strings = c("","NA"))
+```
+
+We can observe that the large training data contains `r dim(lt_data)[1]` 
+observations and `r dim(lt_data)[2]` variables, the last of which is the `classe`
+variable we are interested in predicting. 
+
+A lot of columns have a significant proportion of `NA`'s so we opt to remove 
+variables if more than 50% of their entries are `NA` .
+```{r reduce_data, cache = TRUE}
+lt_data_reduced <- lt_data[, colSums(is.na(lt_data)) < nrow(lt_data) * 0.5]
+test_data_reduced <- test_data[, colSums(is.na(test_data)) < nrow(test_data) * 0.5]
+```
+
+Now our number of variables has been decreased from `r dim(lt_data)[2]` to
+`r dim(lt_data_reduced)[2]`. We can now go ahead and split our large training
+data set into a smaller training and testing subsets for cross validation. Note that
+we ignore the first variable which is just the index of the observations. Below,
+we first use a very small training proportion of 0.1%.
+
+```{r split_data, cache = TRUE}
+inTrain <- createDataPartition(y=lt_data_reduced$classe, p =0.001, list=F)
+training <- lt_data_reduced[ inTrain,-1]
+testing  <- lt_data_reduced[-inTrain,-1]
+```
+
+Move forward with the training of the RF model, time it and perform cross-validation
+using the testing subset of the large training data. Note the output of time taken
+to perform training.
+
+```{r train_rf_model, cache = TRUE, warning = FALSE}
+set.seed(12345)
+system.time(modelFit_rf1 <- train(classe ~ ., method="rf",data=training))
+confusionMatrix(testing$classe,predict(modelFit_rf1,testing))
+```
+
+Note that the out-of-sample prediction accuracy is not very good (37.1%) when utilizing
+a training proportion of 0.1%. The corresponding prediction results on the provided
+HAR 20-case test set is as follows (these are mostly incorrect):
+
+```{r test_rf_model, cache = TRUE}
+pred4proj <- predict(modelFit_rf1,test_data_reduced[,-60])
+pred4proj <- as.data.frame(pred4proj, test_data_reduced$problem_id  )
+```
+```{r hidden_work1, cache = TRUE, echo = FALSE}
+prop_results <- read.csv("results_diff_props.csv")
+pred4proj$pred4proj <- prop_results$prop_0.1
+```
+```{r print_pred4proj}
+pred4proj
+```
+By increasing the proportion of the provided HAR training data set that is 
+actually used for training the RF model (i.e., `p` in the `createDataPartition` 
+function above), we get better out-of-sample prediction accuracy from our model.
+The plot on the left of the figure below shows the resulting improvement in 
+accuracy by increasing the proportion of the HAR training set used from 0.1% to 
+0.5% to 1% to 5% to 10%. The plot on the right shows the corresponding increase
+in training time (in seconds).
+```{r hidden_work2, cache = TRUE, echo = FALSE}
+library(reshape2)
+tperf <- read.csv("train_perf.csv")
+melted_tperf <- melt(tperf,id.vars = "Accuracy.percent")
+qplot(value,Accuracy.percent,data=melted_tperf)+facet_grid(. ~ variable, scales="free")
+```
+
+The plot on the left of the figure above illustrates the convergence achieved
+in prediction accuracy by increasing the training set size. The last value of 98.8%
+is deemed sufficient for this prediction problem and that model is used to predict on
+the 20-case test set. The corresponding predicted classes from the RF models built
+with varying training sizes are shown in the table below. Note the convergence
+of results in going from 5% to 10% proportion of large training set. The last
+column of results were submitted on Coursera for this project and were all correct.
+```{r hidden_work3, cache = TRUE, echo = FALSE}
+prop_results <- read.csv("results_diff_props.csv")
+print(prop_results[,-1])
+```
